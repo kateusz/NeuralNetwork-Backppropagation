@@ -68,12 +68,12 @@ public class LayerTests
         var layer = new Layer(2, 3, new ReLU());
         
         // Ustawiamy znane wagi i biasy
-        var weights = new double[,] 
+        var weights = new Matrix(new double[,]
         {
-            { 0.5, 0.3 },  // Neuron 1: w11=0.5, w12=0.3
-            { 0.2, 0.8 },  // Neuron 2: w21=0.2, w22=0.8
-            { 0.1, 0.6 }   // Neuron 3: w31=0.1, w32=0.6
-        };
+            { 0.5, 0.3 }, // Neuron 1: w11=0.5, w12=0.3
+            { 0.2, 0.8 }, // Neuron 2: w21=0.2, w22=0.8
+            { 0.1, 0.6 } // Neuron 3: w31=0.1, w32=0.6
+        });
         var biases = new double[] { 0.1, 0.2, 0.3 };
         
         layer.SetWeights(weights);
@@ -105,11 +105,11 @@ public class LayerTests
     {
         var layer = new Layer(2, 2, new ReLU());
         
-        var weights = new double[,] 
+        var weights = new Matrix(new double[,] 
         {
             { -1.0, 0.5 },  // Neuron 1: może dać negative result
             { 0.3, -0.8 }   // Neuron 2: może dać negative result
-        };
+        });
         var biases = new double[] { 0.2, -0.1 };
         
         layer.SetWeights(weights);
@@ -134,12 +134,12 @@ public class LayerTests
     {
         var layer = new Layer(1, 3, new Sigmoid());
         
-        var weights = new double[,] 
+        var weights = new Matrix(new double[,] 
         {
             { 10.0 },   // Large positive weight
             { 0.0 },    // Zero weight  
             { -10.0 }   // Large negative weight
-        };
+        });
         var biases = new double[] { 0.0, 0.0, 0.0 };
         
         layer.SetWeights(weights);
@@ -209,7 +209,7 @@ public class LayerTests
         var tanhLayer = new Layer(2, 1, new Tanh());
         
         // Użyj tych samych wag dla fair comparison
-        var weights = new double[,] { { 0.5, 0.3 } };
+        var weights = new Matrix(new double[,] { { 0.5, 0.3 } });
         var biases = new double[] { 0.2 };
         
         sigmoidLayer.SetWeights(weights);
@@ -274,16 +274,16 @@ public class LayerTests
         var layer = new Layer(2, 3, new ReLU());
         
         // Correct size should work
-        var correctWeights = new double[3, 2];
+        var correctWeights = new Matrix(new double[3, 2]);
         Should.NotThrow(() => layer.SetWeights(correctWeights));
         
         // Wrong sizes should throw
-        var wrongSize1 = new double[2, 2]; // Wrong output dimension
-        var wrongSize2 = new double[3, 3]; // Wrong input dimension
+        var wrongSize1 = new Matrix(new double[2, 2]); // Wrong output dimension
+        var wrongSize2 = new Matrix(new double[3, 3]); // Wrong input dimension
         
         Should.Throw<ArgumentException>(() => layer.SetWeights(wrongSize1));
         Should.Throw<ArgumentException>(() => layer.SetWeights(wrongSize2));
-        Should.Throw<ArgumentNullException>(() => layer.SetWeights(null!));
+        Should.Throw<ArgumentNullException>(() => layer.SetWeights((Matrix)null!));
     }
 
     /// <summary>
@@ -387,19 +387,19 @@ public class LayerTests
     {
         var layer = new Layer(2, 3, new ReLU());
         
-        var originalWeights = new double[,] 
+        var originalWeights = new Matrix(new double[,] 
         {
             { 0.1, 0.2 },
             { 0.3, 0.4 },
             { 0.5, 0.6 }
-        };
+        });
         
         layer.SetWeights(originalWeights);
-        var retrievedWeights = layer.GetWeights();
+        var retrievedWeights = layer.GetWeightsMatrix();
         
         // Retrieved weights powinny match original
-        retrievedWeights.GetLength(0).ShouldBe(3);
-        retrievedWeights.GetLength(1).ShouldBe(2);
+        retrievedWeights.Rows.ShouldBe(3);
+        retrievedWeights.Cols.ShouldBe(2);
         
         for (int i = 0; i < 3; i++)
         {
@@ -448,14 +448,14 @@ public class LayerTests
     {
         var layer = new Layer(10, 5, new ReLU());
         
-        var weights = layer.GetWeights();
+        var weights = layer.GetWeightsMatrix();
         var biases = layer.GetBiases();
         
         // Weights powinny być small (dla Xavier initialization)
         var weightValues = new List<double>();
-        for (int i = 0; i < weights.GetLength(0); i++)
+        for (int i = 0; i < weights.Rows; i++)
         {
-            for (int j = 0; j < weights.GetLength(1); j++)
+            for (int j = 0; j < weights.Cols; j++)
             {
                 weightValues.Add(weights[i, j]);
             }

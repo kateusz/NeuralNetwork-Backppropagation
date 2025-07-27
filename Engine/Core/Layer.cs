@@ -1,4 +1,3 @@
-using System.Numerics;
 using Engine.Activations;
 
 namespace Engine.Core;
@@ -8,7 +7,7 @@ namespace Engine.Core;
 /// 
 /// Matematycznie reprezentuje transformację: a^(l) = f(W^(l) × a^(l-1) + b^(l))
 /// gdzie:
-/// - W^(l) to macierz wag [output_neurons × input_neurons]
+/// - W^(l) to macierz wag [output_neurons × input_neurons] (Matrix class)
 /// - a^(l-1) to wektor wejściowy [input_neurons]  
 /// - b^(l) to wektor biasów [output_neurons]
 /// - f() to funkcja aktywacji
@@ -18,9 +17,8 @@ public class Layer
 {
     /// <summary>
     /// Macierz wag połączeń [output_neurons × input_neurons].
-    /// weights[i,j] reprezentuje siłę połączenia od input j do output neuron i.
     /// </summary>
-    private readonly double[,] _weights;
+    private readonly Matrix _weights;
     
     /// <summary>
     /// Wektor biasów [output_neurons].
@@ -66,6 +64,8 @@ public class Layer
     /// </summary>
     public string ActivationName => _activation.Name;
     
+    public Matrix WeightsMatrix => _weights;
+    
     #endregion
     
     /// <summary>
@@ -87,12 +87,9 @@ public class Layer
         OutputSize = outputSize;
         _activation = activation ?? throw new ArgumentNullException(nameof(activation));
         
-        // Inicjalizuj macierze
-        _weights = new double[outputSize, inputSize];
-        _biases = new double[outputSize];
-        
-        // Losowa inicjalizacja wag
-        InitializeWeights();
+        // Używamy Matrix.Random dla automatic Xavier initialization
+        _weights = Matrix.Random(outputSize, inputSize, seed: 42);
+        _biases = new double[outputSize]; // Initialized to zeros
     }
 
     #region Core Methods
@@ -104,6 +101,7 @@ public class Layer
     /// 1. z^(l) = W^(l) × a^(l-1) + b^(l)  (linear transformation)
     /// 2. a^(l) = f(z^(l))                  (non-linear activation)
     /// 
+    /// Wykorzystuje Matrix.MultiplyVector() z SIMD optimization.
     /// Wyniki są cache'owane dla późniejszego backward pass.
     /// </summary>
     /// <param name="inputs">Wektor wejściowy [InputSize]</param>
@@ -120,12 +118,19 @@ public class Layer
                 $"Input size {inputs.Length} doesn't match layer input size {InputSize}", 
                 nameof(inputs));
         
-        // Cache inputs dla backward pass
+        // Cache inputs dla backward pass (defensive copy)
         LastInputs = new double[InputSize];
         Array.Copy(inputs, LastInputs, InputSize);
         
         // KROK 1: Linear transformation z = W × a + b
-        var netInputs = ComputeLinearTransformation(inputs);
+        // Używamy Matrix.MultiplyVector() z SIMD optimization
+        var netInputs = _weights.MultiplyVector(inputs);
+        
+        // Dodaj biases element-wise
+        for (int i = 0; i < OutputSize; i++)
+        {
+            netInputs[i] += _biases[i];
+        }
         
         // Cache net inputs dla backward pass
         LastNetInputs = new double[OutputSize];
@@ -144,58 +149,6 @@ public class Layer
     #endregion
     
     #region Private Core Methods
-    
-    /// <summary>
-    /// Oblicza linear transformation: z = W × a + b
-    /// Używa System.Numerics dla optymalizacji SIMD gdzie to możliwe.
-    /// </summary>
-    /// <param name="inputs">Wektor wejściowy</param>
-    /// <returns>Net inputs (przed aktywacją)</returns>
-    private double[] ComputeLinearTransformation(double[] inputs)
-    {
-        var netInputs = new double[OutputSize];
-        
-        // Matrix-vector multiplication z SIMD optimization
-        for (int i = 0; i < OutputSize; i++)
-        {
-            double sum = 0.0;
-            
-            // Użyj Vector<double> dla SIMD optimization gdy to możliwe
-            int vectorLength = Vector<double>.Count;
-            int vectorizedLength = (InputSize / vectorLength) * vectorLength;
-            
-            // SIMD-optimized portion
-            for (int j = 0; j < vectorizedLength; j += vectorLength)
-            {
-                // Pobierz wagi dla tego neuronu
-                var weights = new double[vectorLength];
-                for (int k = 0; k < vectorLength; k++)
-                {
-                    weights[k] = _weights[i, j + k];
-                }
-                
-                // Pobierz odpowiadające inputs
-                var inputSegment = new double[vectorLength];
-                Array.Copy(inputs, j, inputSegment, 0, vectorLength);
-                
-                // SIMD dot product
-                var weightVector = new Vector<double>(weights);
-                var inputVector = new Vector<double>(inputSegment);
-                sum += Vector.Dot(weightVector, inputVector);
-            }
-            
-            // Handle remaining elements (non-vectorized)
-            for (int j = vectorizedLength; j < InputSize; j++)
-            {
-                sum += _weights[i, j] * inputs[j];
-            }
-            
-            // Dodaj bias
-            netInputs[i] = sum + _biases[i];
-        }
-        
-        return netInputs;
-    }
     
     /// <summary>
     /// Stosuje funkcję aktywacji do każdego elementu net inputs.
@@ -217,68 +170,31 @@ public class Layer
     
     #endregion
     
-    #region Weight Management
+    #region Weight and Bias Management
     
     /// <summary>
-    /// Inicjalizuje wagi losowo używając uproszczonej inicjalizacji Xavier.
-    /// Wagi są losowane z rozkładu normalnego przeskalowanego według liczby połączeń.
-    /// </summary>
-    private void InitializeWeights()
-    {
-        var random = new Random(42); // Fixed seed dla reproducibility w testach
-        
-        // Xavier initialization: wagi ~ N(0, 1/n) gdzie n = InputSize
-        double scale = 1.0 / Math.Sqrt(InputSize);
-        
-        for (int i = 0; i < OutputSize; i++)
-        {
-            for (int j = 0; j < InputSize; j++)
-            {
-                // Box-Muller transformation dla rozkładu normalnego
-                _weights[i, j] = GenerateGaussianRandom(random) * scale;
-            }
-            
-            // Biasy inicjalizujemy zerem
-            _biases[i] = 0.0;
-        }
-    }
-    
-    /// <summary>
-    /// Generuje liczbę losową z rozkładu normalnego N(0,1).
-    /// </summary>
-    private static double GenerateGaussianRandom(Random random)
-    {
-        // Box-Muller transformation
-        static double NextGaussian(Random rnd)
-        {
-            double u1 = 1.0 - rnd.NextDouble();
-            double u2 = 1.0 - rnd.NextDouble();
-            return Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Sin(2.0 * Math.PI * u2);
-        }
-        
-        return NextGaussian(random);
-    }
-    
-    #endregion
-    
-    #region Testing Support Methods
-    
-    /// <summary>
-    /// Ustawia wagi warstwy (głównie do testów).
+    /// Ustawia wagi warstwy z Matrix (głównie do testów).
     /// </summary>
     /// <param name="weights">Nowa macierz wag [OutputSize × InputSize]</param>
     /// <exception cref="ArgumentNullException">Gdy weights jest null</exception>
     /// <exception cref="ArgumentException">Gdy rozmiary macierzy nie pasują</exception>
-    public void SetWeights(double[,] weights)
+    public void SetWeights(Matrix weights)
     {
         if (weights == null)
             throw new ArgumentNullException(nameof(weights));
-        if (weights.GetLength(0) != OutputSize || weights.GetLength(1) != InputSize)
+        if (weights.Rows != OutputSize || weights.Cols != InputSize)
             throw new ArgumentException(
-                $"Weight matrix size [{weights.GetLength(0)},{weights.GetLength(1)}] " +
-                $"doesn't match layer size [{OutputSize},{InputSize}]");
+                $"Weight matrix size {weights.Rows}×{weights.Cols} " +
+                $"doesn't match layer size {OutputSize}×{InputSize}");
         
-        Array.Copy(weights, _weights, weights.Length);
+        // Copy data from provided matrix to our internal matrix
+        for (int i = 0; i < OutputSize; i++)
+        {
+            for (int j = 0; j < InputSize; j++)
+            {
+                _weights[i, j] = weights[i, j];
+            }
+        }
     }
     
     /// <summary>
@@ -299,13 +215,20 @@ public class Layer
     }
     
     /// <summary>
-    /// Pobiera kopię macierzy wag (głównie do testów i debugowania).
+    /// Pobiera kopię macierzy wag jako Matrix (głównie do testów i debugowania).
     /// </summary>
-    /// <returns>Kopia macierzy wag</returns>
-    public double[,] GetWeights()
+    /// <returns>Kopia macierzy wag jako Matrix</returns>
+    public Matrix GetWeightsMatrix()
     {
-        var copy = new double[OutputSize, InputSize];
-        Array.Copy(_weights, copy, _weights.Length);
+        // Matrix class already provides defensive copying in its operations
+        var copy = new Matrix(OutputSize, InputSize);
+        for (int i = 0; i < OutputSize; i++)
+        {
+            for (int j = 0; j < InputSize; j++)
+            {
+                copy[i, j] = _weights[i, j];
+            }
+        }
         return copy;
     }
     
@@ -322,12 +245,63 @@ public class Layer
     
     #endregion
     
+    #region Advanced Matrix Operations
+    
+    /// <summary>
+    /// Oblicza transpozycję macierzy wag (potrzebne dla backward propagation).
+    /// </summary>
+    /// <returns>Transponowana macierz wag [InputSize × OutputSize]</returns>
+    public Matrix GetWeightsTranspose()
+    {
+        return _weights.Transpose();
+    }
+    
+    /// <summary>
+    /// Mnoży transpozycję wag przez wektor (common operation w backpropagation).
+    /// Implementuje: W^T × vector, gdzie W^T ma wymiary [InputSize × OutputSize].
+    /// </summary>
+    /// <param name="vector">Wektor do pomnożenia [OutputSize]</param>
+    /// <returns>Wynik mnożenia [InputSize]</returns>
+    /// <exception cref="ArgumentNullException">Gdy vector jest null</exception>
+    /// <exception cref="ArgumentException">Gdy rozmiar wektora nie pasuje</exception>
+    public double[] MultiplyWeightsTranspose(double[] vector)
+    {
+        if (vector == null)
+            throw new ArgumentNullException(nameof(vector));
+        if (vector.Length != OutputSize)
+            throw new ArgumentException(
+                $"Vector length {vector.Length} doesn't match output size {OutputSize}",
+                nameof(vector));
+        
+        var weightsTranspose = _weights.Transpose();
+        return weightsTranspose.MultiplyVector(vector);
+    }
+    
+    #endregion
+    
     #region Diagnostics and Debugging
     
     /// <summary>
     /// Sprawdza czy warstwa ma cache'owane wartości z ostatniego Forward pass.
     /// </summary>
     public bool HasCachedValues => LastInputs != null && LastNetInputs != null && LastOutputs != null;
+    
+    /// <summary>
+    /// Zwraca podstawowe statystyki wag dla diagnostyki.
+    /// </summary>
+    /// <returns>String z statystykami wag</returns>
+    public string GetWeightStatistics()
+    {
+        var weights1D = _weights.ToArray1D();
+        
+        var mean = weights1D.Average();
+        var variance = weights1D.Select(w => (w - mean) * (w - mean)).Average();
+        var stdDev = Math.Sqrt(variance);
+        var min = weights1D.Min();
+        var max = weights1D.Max();
+        
+        return $"Weights: μ={mean:F4}, σ={stdDev:F4}, range=[{min:F4}, {max:F4}]";
+    }
     
     /// <summary>
     /// Zwraca string reprezentację warstwy dla debugowania.
