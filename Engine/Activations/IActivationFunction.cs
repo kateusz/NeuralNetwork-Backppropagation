@@ -2,7 +2,7 @@ namespace Engine.Activations;
 
 /// <summary>
 /// Interfejs dla funkcji aktywacji w sieci neuronowej.
-/// Każda funkcja aktywacji musi implementować zarówno funkcję przodu jak i jej pochodną.
+/// Każda funkcja aktywacji musi implementować zarówno funkcję przodu jak i jej pochodną
 /// </summary>
 public interface IActivationFunction
 {
